@@ -21,12 +21,27 @@ import BleManager from 'react-native-ble-manager';
 const BleManagerModule = NativeModules.BleManager;
 const bleManagerEmitter = new NativeEventEmitter(BleManagerModule);
 
+// nb: react-native-crypto has a dependency issue;
+// library used seems less good but ok for our purposes
+// https://github.com/juhoen/hybrid-crypto-js
+import { Crypt, RSA } from 'hybrid-crypto-js';
+import 'react-native-get-random-values';
+
 const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
   const peripherals = new Map();
   const [list, setList] = React.useState([]);
+  var publicKey, privateKey;
 
   React.useEffect(() => {
+    // Initialize public and private keys
+    var rsa = new RSA({ entropy: 244 });
+    rsa.generateKeyPair(function(keys) {
+        console.log(keys);
+        publicKey = keys.publicKey;
+        privateKey = keys.privateKey;
+    }, 1024);
+
     BleManager.start({ showAlert: false });
 
     bleManagerEmitter.addListener('BleManagerDiscoverPeripheral', handleDiscoverPeripheral);
@@ -137,6 +152,23 @@ const App = () => {
     }
   };
 
+  const genKeyPair = () => {
+      rsa = new RSA({ entropy: crypto.getRandomValues(new Int32Array([244, 100])) });
+      rsa.generateKeyPair(function(keys) {
+          console.log(keys);
+          publicKey = keys.publicKey;
+          privateKey = keys.privateKey;
+      }, 1024);
+  }
+
+  const testCrypto = () => {
+      var crypt = new Crypt({ md: 'sha256' });
+      var toEncrypt = crypto.getRandomValues(new Int32Array([244, 100]));
+      var encrypted = crypt.encrypt(publicKey, toEncrypt);
+      var decrypted = crypt.decrypt(privateKey, encrypted);
+      console.log("Encrypted", toEncrypt, " and got back", decrypted);
+  }
+
   const renderItem = (item) => {
     const color = item.connected ? 'green' : '#fff';
     return (
@@ -183,6 +215,14 @@ const App = () => {
 
             <View style={{ margin: 10 }}>
               <Button title="Retrieve connected peripherals" onPress={() => retrieveConnected()} />
+            </View>
+
+            <View style={{ margin: 10 }}>
+              <Button title="Generate a fresh key pair (may take a while)" onPress={() => genKeyPair()} />
+            </View>
+
+            <View style={{ margin: 10 }}>
+              <Button title="Encrypt and decrypt a message" onPress={() => testCrypto()} />
             </View>
 
             {list.length == 0 && (
