@@ -32,6 +32,7 @@ const App = () => {
   const peripherals = new Map();
   const [list, setList] = React.useState([]);
   var publicKey, privateKey;
+  const crypt = new Crypt({ md: 'sha256' });
 
   React.useEffect(() => {
     // Initialize public and private keys
@@ -162,11 +163,52 @@ const App = () => {
   }
 
   const testCrypto = () => {
-      var crypt = new Crypt({ md: 'sha256' });
       var toEncrypt = crypto.getRandomValues(new Int32Array([244, 100]));
       var encrypted = crypt.encrypt(publicKey, toEncrypt);
       var decrypted = crypt.decrypt(privateKey, encrypted);
       console.log("Encrypted", toEncrypt, " and got back", decrypted);
+  }
+
+  /* Generate a trivial key advertisement message.
+   */
+  const genKeyShareMessage = () => {
+      /* TODO: maybe include and sign time, to prevent someone from advertising
+      someone else's key with a copy of the message? */
+      const msg = {header: "DENSE keyshare", message: publicKey};
+      return msg;
+  }
+
+  const sanityCheck = (encrypted) => {
+      const decrypted = crypt.decrypt(privateKey, encrypted);
+      const verified = crypt.verify(
+          publicKey,
+          decrypted.signature,
+          decrypted.message,
+      );
+      if (verified) {
+          console.log("Encryption and signature passes sanity check!")
+          console.log("Decrypted message: ", decrypted.message)
+      }
+  }
+
+  /* Generate an exposure notification message. Messages include a header,
+   * time (if >a week ago, stop forwarding), and signed, encrypted
+   * [sender's public key, time that message was sent]. (The time can't be verified/signed
+   * as the message may be forwarded by intermediaries who shouldn't know the sender's identity.)
+   */
+  const genExposureNotification = () => {
+      const time = Date.now();
+      const salt = crypto.getRandomValues(new Int32Array([244]))[0];
+      const message = publicKey + "\n" + time + "\n" + salt;
+      const signature = crypt.signature(privateKey, message);
+
+      /* TODO: update to encrypt with the public keys of receivers from log,
+      in place of sender's public key, and remove sanity check.*/
+      const encrypted = crypt.encrypt([publicKey, publicKey], message, signature);
+      const msg = {header: "DENSE exposure", time: time, message: encrypted};
+      sanityCheck(msg.message);
+
+      return msg;
   }
 
   const renderItem = (item) => {
@@ -223,6 +265,15 @@ const App = () => {
 
             <View style={{ margin: 10 }}>
               <Button title="Encrypt and decrypt a message" onPress={() => testCrypto()} />
+            </View>
+
+            <View style={{ margin: 10 }}>
+              <Button title="Print a key share to the console" onPress={() => console.log(genKeyShareMessage())} />
+            </View>
+
+            <View style={{ margin: 10 }}>
+              <Button title="Print an exposure notification to the console"
+                onPress={() => console.log(genExposureNotification())} />
             </View>
 
             {list.length == 0 && (
