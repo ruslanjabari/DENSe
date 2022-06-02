@@ -34,6 +34,12 @@ const EXPOSURE_HEADER = "DENSE exposure";
 const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
   const peripherals = new Map();
+
+  // TODO: make persistent
+  let contactKeyToTime = new Map();
+  let notifications = new Set();
+  let l2Keys = new Set();
+
   const [list, setList] = React.useState([]);
   var publicKey, privateKey;
   const crypt = new Crypt({ md: "sha256" });
@@ -191,7 +197,13 @@ const App = () => {
   const genKeyShareMessage = () => {
     /* TODO: maybe include and sign time, to prevent someone from advertising
       someone else's key with a copy of the message? */
-    const msg = { header: KEYSHARE_HEADER, message: publicKey };
+    const time = Date.now();
+    const number = 'Hashed number';
+    const msg = {
+      header: KEYSHARE_HEADER,
+      message: publicKey,
+      time: time,
+      phoneNo: number };
     return msg;
   };
 
@@ -241,13 +253,15 @@ const App = () => {
    * - message: should contain a public key
    */
   const processKeyShareMessage = (msg) => {
-    const time = Date.now();
+    const time = msg.time;
     const pk = msg.message;
+    const no = msg.phoneNo;
     const nonce = crypto.randomBytes(16); // 128-bit nonce
+    console.log(`received keyshare message at time ${time}: (${pk}, ${no}, ${nonce})`);
 
-    console.log(`received keyshare message at time ${time}: (${pk}, ${nonce})`);
-
-    // TODO: log (time, pk, nonce)
+    // Log message info
+    contactKeyToTime[pk] = msg.time;
+    // TODO: compare hashes of numbers with msg.phoneNo
   };
 
   /* Processes an exposure notification message. The message should be of the following format:
