@@ -31,6 +31,34 @@ import "react-native-get-random-values";
 const KEYSHARE_HEADER = "DENSE keyshare";
 const EXPOSURE_HEADER = "DENSE exposure";
 
+import Contacts from 'react-native-contacts';
+import EncryptedStorage from 'react-native-encrypted-storage';
+
+const retrieveUserSession = () => {
+  try {
+    const session = await EncryptedStorage.getItem('contacts');
+
+    if (session !== undefined) {
+      // Congrats! You've just retrieved your first value!
+    } else {
+      Contacts.getAll().then(async (contacts) => {
+        // contacts returned
+        //  hash then store
+        let phones = [];
+        contacts.forEach(contact => phones.push(contact.phoneNumbers.filter(obj => obj.label === 'mobile')[0].number));
+        let hashed;
+        await EncryptedStorage.setItem(
+          'contacts',
+          JSON.stringify([hashed, new Date().getTime()])
+        );
+      });
+    }
+  } catch (error) {
+    // There was an error on the native side
+    console.error('Error in retrieveUserSession: ', error);
+  }
+}
+
 const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
   const peripherals = new Map();
@@ -68,6 +96,7 @@ const App = () => {
       "BleManagerDidUpdateValueForCharacteristic",
       handleUpdateValueForCharacteristic
     );
+    retrieveUserSession();
   }, []);
 
   const startScan = () => {
@@ -175,9 +204,7 @@ const App = () => {
   };
 
   const genKeyPair = () => {
-    rsa = new RSA({
-      entropy: crypto.getRandomValues(new Int32Array([244, 100])),
-    });
+    rsa = new RSA({ entropy: crypto.getRandomValues(new Int32Array([244, 100])) });
     rsa.generateKeyPair(function (keys) {
       console.log(keys);
       publicKey = keys.publicKey;
