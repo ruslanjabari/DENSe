@@ -12,10 +12,11 @@ import {
   // Platform,
   // PermissionsAndroid,
   FlatList,
-  TouchableHighlight,
+  TouchableHighlight
 } from "react-native";
 
 import { Colors } from "react-native/Libraries/NewAppScreen";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import BleManager from "react-native-ble-manager";
 const BleManagerModule = NativeModules.BleManager;
@@ -260,6 +261,8 @@ const App = () => {
       console.log(`ignoring stale exposure message`);
       return;
     }
+
+    // ignore message if pk found in covid map
 
     // TODO: hash message and check notification log to see if this message has already been received
 

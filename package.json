@@ -10,6 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^1.17.6",
     "convert-string": "^0.1.0",
     "hybrid-crypto-js": "^0.2.4",
     "react": "17.0.2",
