@@ -34,7 +34,7 @@ const EXPOSURE_HEADER = "DENSE exposure";
 import Contacts from 'react-native-contacts';
 import EncryptedStorage from 'react-native-encrypted-storage';
 
-const retrieveUserSession = () => {
+const retrieveUserSession = async() => {
   try {
     const session = await EncryptedStorage.getItem('contacts');
 
@@ -67,6 +67,9 @@ const App = () => {
   let contactKeyToTime = new Map();
   let notifications = new Set();
   let l2Keys = new Set();
+
+  // A placeholder representing the user's phone number
+  let ownVerifiedNo = "244";
 
   const [list, setList] = React.useState([]);
   var publicKey, privateKey;
@@ -225,12 +228,11 @@ const App = () => {
     /* TODO: maybe include and sign time, to prevent someone from advertising
       someone else's key with a copy of the message? */
     const time = Date.now();
-    const number = 'Hashed number';
     const msg = {
       header: KEYSHARE_HEADER,
-      message: publicKey,
+      pk: publicKey,
       time: time,
-      phoneNo: number };
+      phoneNo: ownVerifiedNo};
     return msg;
   };
 
@@ -280,52 +282,61 @@ const App = () => {
    * - message: should contain a public key
    */
   const processKeyShareMessage = (msg) => {
-    const time = msg.time;
-    const pk = msg.message;
-    const no = msg.phoneNo;
+    const message = JSON.parse(msg);
+    const time = message.time;
+    const pk = message.pk;
+    const no = message.phoneNo;
     const nonce = crypto.randomBytes(16); // 128-bit nonce
     console.log(`received keyshare message at time ${time}: (${pk}, ${no}, ${nonce})`);
 
     // Log message info
-    contactKeyToTime[pk] = msg.time;
-    // TODO: compare hashes of numbers with msg.phoneNo
+    contactKeyToTime[pk] = message.time;
+    // TODO: compare hashes of numbers with msg.phoneNo and add to L2 if necessary
   };
 
   /* Processes an exposure notification message. The message should be of the following format:
    * - header: should be equal to EXPOSURE_HEADER
+   * - sender_pk: public key of original sender
    * - time: time when message was sent
-   * - message: JSON object { pk, time, salt } encrypted with the recipient's public key
+   * - l2Info: JSON object { name, salt } encrypted with the recipient's public key
    */
   const processExposureMessage = (msg) => {
+    
+    const message = JSON.parse(msg);
+
     // ignore message if it's older than a week ago
-    if (Date.now() - msg.time >= 7 * 24 * 60 * 60 * 1000) {
+    if (Date.now() - message.time >= 7 * 24 * 60 * 60 * 1000) {
       console.log(`ignoring stale exposure message`);
       return;
     }
 
-    // ignore message if pk found in covid map
+    // Attempt to decrypt more details as L2
+    let l2Info = null;
+    if (l2Keys.has(message.sender_pk)) {
+      l2Info = crypt.decrypt(privateKey, message.l2Info);
+    }
 
-    // TODO: hash message and check notification log to see if this message has already been received
-
-    const decrypted = crypt.decrypt(privateKey, msg.message);
-    const message = JSON.parse(decrypted.message);
-
+    // TODO: modify this to be compatible with message structure
     const verified = crypt.verify(
       message.sender_pk,
-      decrypted.signature,
+      message.signature,
       decrypted.message
     );
-
     if (!verified) {
       console.log("Received exposure message with incorrect signature");
       return;
     }
 
-    // TODO: search logs for message.sender_pk time of encounter and alert user
-
-    // TODO: broadcast the same message to nearby devices
-
-    // TODO: add message to notification log
+    // Check if message has already been received
+    if (notifications.has(message)) {
+      console.log("Message already contained in notifications.");
+      return;
+    }
+    notifications.add(message);
+    if (contactKeyToTime.has(message.sender_pk)) {
+      console.log(`Received COVID exposure notification for key ${message.sender_pk}`);
+      // TODO: notify user with relevant information
+    }
   };
 
   const renderItem = (item) => {
