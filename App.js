@@ -63,13 +63,14 @@ const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
   const peripherals = new Map();
 
-  // TODO: make persistent
+  // TODO: extract from persistent storage
   let contactKeyToTime = new Map();
   let notifications = new Set();
   let l2Keys = new Set();
 
   // A placeholder representing the user's phone number
   let ownVerifiedNo = "244";
+  let enteredName = "Rusnajeryan";
 
   const [list, setList] = React.useState([]);
   var publicKey, privateKey;
@@ -255,26 +256,34 @@ const App = () => {
    * as the message may be forwarded by intermediaries who shouldn't know the sender's identity.)
    */
   const genExposureNotification = () => {
+    // Unencrypted information
+    const sender_pk = publicKey;
     const time = Date.now();
+
+    // Encrypted information
+    const name = enteredName;
     const salt = crypto.getRandomValues(new Int32Array([244]))[0];
-    const message = {
-      sender_pk: publicKey,
-      time: time,
-      salt: salt,
+    const l2Info = {
+      name: name,
+      salt: salt
     };
-    const signature = crypt.signature(privateKey, message);
-
-    /* TODO: update to encrypt with the public keys of receivers from log,
-      in place of sender's public key, and remove sanity check.*/
-    const encrypted = crypt.encrypt(
+    const l2Signature = crypt.signature(privateKey, l2Info);
+    const l2Encrypted = crypt.encrypt(
       [publicKey, publicKey],
-      JSON.stringify(message),
-      signature
+      JSON.stringify(l2Info),
+      l2Signature
     );
-    const msg = { header: EXPOSURE_HEADER, time: time, message: encrypted };
-    sanityCheck(msg.message);
 
-    return msg;
+    // Full message
+    const fullMessage = {
+      header: EXPOSURE_HEADER,
+      sender_pk: sender_pk,
+      time: time,
+      l2Info: l2Encrypted
+    }
+
+    sanityCheck(fullMessage.l2Info);
+    return fullMessage;
   };
 
   /* Processes a key-share message. The message should be of the following format:
@@ -285,9 +294,9 @@ const App = () => {
     const message = JSON.parse(msg);
     const time = message.time;
     const pk = message.pk;
-    const no = message.phoneNo;
+    const phoneNo = message.phoneNo;
     const nonce = crypto.randomBytes(16); // 128-bit nonce
-    console.log(`received keyshare message at time ${time}: (${pk}, ${no}, ${nonce})`);
+    console.log(`received keyshare message at time ${time}: (${pk}, ${phoneNo}, ${nonce})`);
 
     // Log message info
     contactKeyToTime[pk] = message.time;
@@ -304,27 +313,23 @@ const App = () => {
     
     const message = JSON.parse(msg);
 
-    // ignore message if it's older than a week ago
+    // Ignore notifications more than a week old
     if (Date.now() - message.time >= 7 * 24 * 60 * 60 * 1000) {
       console.log(`ignoring stale exposure message`);
       return;
     }
 
     // Attempt to decrypt more details as L2
-    let l2Info = null;
+    let l2Decrypted = null;
     if (l2Keys.has(message.sender_pk)) {
-      l2Info = crypt.decrypt(privateKey, message.l2Info);
-    }
-
-    // TODO: modify this to be compatible with message structure
-    const verified = crypt.verify(
-      message.sender_pk,
-      message.signature,
-      decrypted.message
-    );
-    if (!verified) {
-      console.log("Received exposure message with incorrect signature");
-      return;
+      l2Decrypted = crypt.decrypt(privateKey, message.l2Info);
+      const verified = crypt.verify(
+        message.sender_pk,
+        l2Decrypted.signature,
+      );
+      if (!verified) {
+        console.log("Recevied exposure notification with incorrect signature.");
+      }
     }
 
     // Check if message has already been received
@@ -332,10 +337,15 @@ const App = () => {
       console.log("Message already contained in notifications.");
       return;
     }
+    // Add to notification storage
     notifications.add(message);
+
+    // Check if key belongs to close contact
     if (contactKeyToTime.has(message.sender_pk)) {
       console.log(`Received COVID exposure notification for key ${message.sender_pk}`);
-      // TODO: notify user with relevant information
+      if (l2Decrypted !== null) {
+        // TODO: notify user with relevant information
+      }
     }
   };
 
