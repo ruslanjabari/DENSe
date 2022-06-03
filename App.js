@@ -341,7 +341,7 @@ const App = () => {
     const time = message.time;
     const pk = message.pk;
     // const nonce = crypto.randomBytes(16); // 128-bit nonce
-    console.log(`Received keyshare message at time ${time}`);
+    console.log(`Received keyshare message at time ${time}.`);
     // Log message info
     contactKeyToTime.set(pk, message.time);
     storeUserSession();
