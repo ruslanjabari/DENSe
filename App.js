@@ -318,7 +318,7 @@ const App = () => {
       time: time.toUTCString(),
       salt: salt,
     };
-    const signature = crypt.signature(privateKey, message);
+    const signature = crypt.signature(privateKey, JSON.stringify(message));
 
     const encrypted = crypt.encrypt(
       Array.from(contactKeyToTime.keys()),
@@ -341,7 +341,7 @@ const App = () => {
     const time = message.time;
     const pk = message.pk;
     // const nonce = crypto.randomBytes(16); // 128-bit nonce
-    console.log(`Received keyshare message at time ${time}.`);
+    console.log(`Received keyshare message at time ${time}`);
     // Log message info
     contactKeyToTime.set(pk, message.time);
     storeUserSession();
