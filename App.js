@@ -31,7 +31,6 @@ import "react-native-get-random-values";
 const KEYSHARE_HEADER = "DENSE keyshare";
 const EXPOSURE_HEADER = "DENSE exposure";
 
-import Contacts from 'react-native-contacts';
 import EncryptedStorage from 'react-native-encrypted-storage';
 
 /*
@@ -70,17 +69,20 @@ const App = () => {
   let notifications = new Set();
 
   const [list, setList] = React.useState([]);
-  var publicKey, privateKey;
+  let publicKey, privateKey;
   const crypt = new Crypt({ md: "sha256" });
 
   React.useEffect(() => {
+    retrieveUserSession();
     // Initialize public and private keys
-    var rsa = new RSA({ entropy: 244 });
-    rsa.generateKeyPair(function (keys) {
-      console.log(keys);
-      publicKey = keys.publicKey;
-      privateKey = keys.privateKey;
-    }, 1024);
+    if (publicKey === undefined) {
+      var rsa = new RSA({ entropy: 244 });
+      rsa.generateKeyPair(function (keys) {
+        console.log(keys);
+        publicKey = keys.publicKey;
+        privateKey = keys.privateKey;
+      }, 1024);
+    }
 
     BleManager.start({ showAlert: false });
 
@@ -99,6 +101,36 @@ const App = () => {
     );
     retrieveUserSession();
   }, []);
+
+  const retrieveUserSession = async() => {
+    console.log("Retrieving user session.");
+    try {
+      const session = await EncryptedStorage.getItem('session');
+      if (session !== undefined) {
+        console.log("Session found - setup from encrypted storage.");
+        sessionObj = JSON.parse(session);
+        publicKey = sessionObj['pk'];
+        privateKey = sessionObj['sk'];
+        contactKeyToTime = new Map(Object.entries(JSON.parse(sessionObj['contactKeyToTime'])));
+        notifications = new Set(sessionObj['notifications']);
+        console.log("Setup complete.")
+      }
+    } catch (error) {
+      console.log("Encountered error in retrieving user session.")
+    }
+  }
+
+  const storeUserSession = async() => {
+    const sessionObj = new Object();
+    sessionObj['notifications'] = Array.from(notifications.values());
+    sessionObj['contactKeyToTime'] = JSON.stringify(contactKeyToTime);
+    sessionObj['pk'] = publicKey;
+    sessionObj['sk'] = privateKey;
+    await EncryptedStorage.setItem(
+      'session',
+      JSON.stringify(sessionObj)
+    );
+  }
 
   const startScan = () => {
     if (!isScanning) {
@@ -220,22 +252,46 @@ const App = () => {
     console.log("Encrypted", toEncrypt, " and got back", decrypted);
   };
 
+  const testKeyShare = () => {
+    contactKeyToTime = new Map();
+    notifications = new Set();
+    let msg = genKeyShareMessage();
+    console.log(msg);
+    let serialized = JSON.stringify(msg);
+    processKeyShareMessage(serialized);
+  }
+
+  /**
+   * Test generation and processing of local exposure notification.
+   */
+  const testExposureNotification = () => {
+    contactKeyToTime = new Map();
+    notifications = new Set();
+    const time = (new Date()).toUTCString();
+    contactKeyToTime.set(publicKey, time);
+    let msg = genExposureNotification();
+    sanityCheck(msg.message);
+    let serialized = JSON.stringify(msg);
+    processExposureMessage(serialized);
+  }
+
+
   /* Generate a trivial key advertisement message.
    */
   const genKeyShareMessage = () => {
-    /* TODO: maybe include and sign time, to prevent someone from advertising
-      someone else's key with a copy of the message? */
-    const time = Date.now();
+    const time = new Date();
     const msg = {
       header: KEYSHARE_HEADER,
       pk: publicKey,
-      time: time
+      time: time.toUTCString()
     };
     return msg;
   };
 
   const sanityCheck = (encrypted) => {
+    console.log("Performing sanity check...");
     const decrypted = crypt.decrypt(privateKey, encrypted);
+    console.log("Successfully decrypted message.");
     const verified = crypt.verify(
       publicKey,
       decrypted.signature,
@@ -253,25 +309,26 @@ const App = () => {
    * as the message may be forwarded by intermediaries who shouldn't know the sender's identity.)
    */
   const genExposureNotification = () => {
+    console.log("Generating exposure notification...");
     // Encrypted information
-    const time = Date.now();
+    const time = new Date();
     const salt = crypto.getRandomValues(new Int32Array([244]))[0];
     const message = {
       sender_pk: publicKey,
-      time: time,
+      time: time.toUTCString(),
       salt: salt,
     };
     const signature = crypt.signature(privateKey, message);
 
     const encrypted = crypt.encrypt(
-      contactKeyToTime.keys(),
+      Array.from(contactKeyToTime.keys()),
       JSON.stringify(message),
       signature
     );
 
-    const msg = { header: EXPOSURE_HEADER, time: time, message: encrypted };
-    sanityCheck(msg.message);
+    console.log("Successfully encrypted message.");
 
+    const msg = { header: EXPOSURE_HEADER, time: time, message: encrypted };
     return msg;
   };
 
@@ -283,10 +340,11 @@ const App = () => {
     const message = JSON.parse(msg);
     const time = message.time;
     const pk = message.pk;
-    const nonce = crypto.randomBytes(16); // 128-bit nonce
-    console.log(`received keyshare message at time ${time}: (${pk}, ${phoneNo}, ${nonce})`);
+    // const nonce = crypto.randomBytes(16); // 128-bit nonce
+    console.log(`Received keyshare message at time ${time}.`);
     // Log message info
-    contactKeyToTime[pk] = message.time;
+    contactKeyToTime.set(pk, message.time);
+    storeUserSession();
   };
 
   /* Processes an exposure notification message. The message should be of the following format:
@@ -295,10 +353,9 @@ const App = () => {
    * - message: JSON object { pk, time, salt } encrypted with the recipient's public key
    */
   const processExposureMessage = (msg) => {
-    
     const message = JSON.parse(msg);
     // Ignore notifications more than a week old
-    if (Date.now() - message.time >= 7 * 24 * 60 * 60 * 1000) {
+    if (Date.now() - Date.parse(message.time) >= 7 * 24 * 60 * 60 * 1000) {
       console.log(`ignoring stale exposure message`);
       return;
     }
@@ -308,32 +365,37 @@ const App = () => {
       console.log("Message already contained in notifications.");
       return;
     }
-    
-    // Add to notification storage
+
+    // Add to encrypted notification storage
     notifications.add(msg);
+    console.log("Adding exposure notification to storage.");
+    storeUserSession();
+    console.log("Updated storage.");
 
     let decrypted = null;
     try {
-      decrypted = crypt.decrypt(privateKey, message.msg);
+      decrypted = crypt.decrypt(privateKey, message.message);
     } catch (error) {
       return;
     }
+    console.log("Successfully decrypted exposure notification.");
 
+    let sender_pk = JSON.parse(decrypted.message).sender_pk;
     const verified = crypt.verify(
-      message.sender_pk,
+      sender_pk,
       decrypted.signature,
       decrypted.message
     );
-
     if (!verified) {
       console.log("Received exposure notification with incorrect signature.");
+      // return;
     }
-
     // Check if key belongs to close contact
-    if (contactKeyToTime.has(message.sender_pk)) {
-      console.log(`Exposure for key ${message.sender_pk}, in close contact at time ${contactKeyToTime[message.sender_pk]}`);
+    if (contactKeyToTime.has(sender_pk)) {
+      console.log(`Exposure at time ${contactKeyToTime.get(sender_pk)}.`);
       // Send notification to user
     }
+    console.log("Completed processing of exposure message...");
   };
 
   const renderItem = (item) => {
@@ -421,15 +483,15 @@ const App = () => {
 
             <View style={{ margin: 10 }}>
               <Button
-                title="Print a key share to the console"
-                onPress={() => console.log(genKeyShareMessage())}
+                title="Generate and process keyshare message"
+                onPress={() => testKeyShare()}
               />
             </View>
 
             <View style={{ margin: 10 }}>
               <Button
-                title="Print an exposure notification to the console"
-                onPress={() => console.log(genExposureNotification())}
+                title="Generate and process exposure notification"
+                onPress={() => testExposureNotification()}
               />
             </View>
 
