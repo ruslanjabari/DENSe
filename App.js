@@ -33,38 +33,10 @@ const EXPOSURE_HEADER = "DENSE exposure";
 
 import EncryptedStorage from 'react-native-encrypted-storage';
 
-/*
-const retrieveUserSession = async() => {
-  try {
-    const session = await EncryptedStorage.getItem('contacts');
-
-    if (session !== undefined) {
-      // Congrats! You've just retrieved your first value!
-    } else {
-      Contacts.getAll().then(async (contacts) => {
-        // contacts returned
-        //  hash then store
-        let phones = [];
-        contacts.forEach(contact => phones.push(contact.phoneNumbers.filter(obj => obj.label === 'mobile')[0].number));
-        let hashed;
-        await EncryptedStorage.setItem(
-          'contacts',
-          JSON.stringify([hashed, new Date().getTime()])
-        );
-      });
-    }
-  } catch (error) {
-    // There was an error on the native side
-    console.error('Error in retrieveUserSession: ', error);
-  }
-}
-*/
-
 const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
   const peripherals = new Map();
 
-  // TODO: extract from persistent storage
   let contactKeyToTime = new Map();
   let notifications = new Set();
 
@@ -340,7 +312,6 @@ const App = () => {
     const message = JSON.parse(msg);
     const time = message.time;
     const pk = message.pk;
-    // const nonce = crypto.randomBytes(16); // 128-bit nonce
     console.log(`Received keyshare message at time ${time}.`);
     // Log message info
     contactKeyToTime.set(pk, message.time);
@@ -388,7 +359,7 @@ const App = () => {
     );
     if (!verified) {
       console.log("Received exposure notification with incorrect signature.");
-      // return;
+      return;
     }
     // Check if key belongs to close contact
     if (contactKeyToTime.has(sender_pk)) {
