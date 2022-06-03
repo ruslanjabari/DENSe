@@ -34,6 +34,7 @@ const EXPOSURE_HEADER = "DENSE exposure";
 import Contacts from 'react-native-contacts';
 import EncryptedStorage from 'react-native-encrypted-storage';
 
+/*
 const retrieveUserSession = async() => {
   try {
     const session = await EncryptedStorage.getItem('contacts');
@@ -58,6 +59,7 @@ const retrieveUserSession = async() => {
     console.error('Error in retrieveUserSession: ', error);
   }
 }
+*/
 
 const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
@@ -66,11 +68,6 @@ const App = () => {
   // TODO: extract from persistent storage
   let contactKeyToTime = new Map();
   let notifications = new Set();
-  let l2Keys = new Set();
-
-  // A placeholder representing the user's phone number
-  let ownVerifiedNo = "244";
-  let enteredName = "Rusnajeryan";
 
   const [list, setList] = React.useState([]);
   var publicKey, privateKey;
@@ -232,8 +229,8 @@ const App = () => {
     const msg = {
       header: KEYSHARE_HEADER,
       pk: publicKey,
-      time: time,
-      phoneNo: ownVerifiedNo};
+      time: time
+    };
     return msg;
   };
 
@@ -256,34 +253,26 @@ const App = () => {
    * as the message may be forwarded by intermediaries who shouldn't know the sender's identity.)
    */
   const genExposureNotification = () => {
-    // Unencrypted information
-    const sender_pk = publicKey;
-    const time = Date.now();
-
     // Encrypted information
-    const name = enteredName;
+    const time = Date.now();
     const salt = crypto.getRandomValues(new Int32Array([244]))[0];
-    const l2Info = {
-      name: name,
-      salt: salt
+    const message = {
+      sender_pk: publicKey,
+      time: time,
+      salt: salt,
     };
-    const l2Signature = crypt.signature(privateKey, l2Info);
-    const l2Encrypted = crypt.encrypt(
-      [publicKey, publicKey],
-      JSON.stringify(l2Info),
-      l2Signature
+    const signature = crypt.signature(privateKey, message);
+
+    const encrypted = crypt.encrypt(
+      contactKeyToTime.keys(),
+      JSON.stringify(message),
+      signature
     );
 
-    // Full message
-    const fullMessage = {
-      header: EXPOSURE_HEADER,
-      sender_pk: sender_pk,
-      time: time,
-      l2Info: l2Encrypted
-    }
+    const msg = { header: EXPOSURE_HEADER, time: time, message: encrypted };
+    sanityCheck(msg.message);
 
-    sanityCheck(fullMessage.l2Info);
-    return fullMessage;
+    return msg;
   };
 
   /* Processes a key-share message. The message should be of the following format:
@@ -294,42 +283,24 @@ const App = () => {
     const message = JSON.parse(msg);
     const time = message.time;
     const pk = message.pk;
-    const phoneNo = message.phoneNo;
     const nonce = crypto.randomBytes(16); // 128-bit nonce
     console.log(`received keyshare message at time ${time}: (${pk}, ${phoneNo}, ${nonce})`);
-
     // Log message info
     contactKeyToTime[pk] = message.time;
-    // TODO: compare hashes of numbers with msg.phoneNo and add to L2 if necessary
   };
 
   /* Processes an exposure notification message. The message should be of the following format:
    * - header: should be equal to EXPOSURE_HEADER
-   * - sender_pk: public key of original sender
    * - time: time when message was sent
-   * - l2Info: JSON object { name, salt } encrypted with the recipient's public key
+   * - message: JSON object { pk, time, salt } encrypted with the recipient's public key
    */
   const processExposureMessage = (msg) => {
     
     const message = JSON.parse(msg);
-
     // Ignore notifications more than a week old
     if (Date.now() - message.time >= 7 * 24 * 60 * 60 * 1000) {
       console.log(`ignoring stale exposure message`);
       return;
-    }
-
-    // Attempt to decrypt more details as L2
-    let l2Decrypted = null;
-    if (l2Keys.has(message.sender_pk)) {
-      l2Decrypted = crypt.decrypt(privateKey, message.l2Info);
-      const verified = crypt.verify(
-        message.sender_pk,
-        l2Decrypted.signature,
-      );
-      if (!verified) {
-        console.log("Recevied exposure notification with incorrect signature.");
-      }
     }
 
     // Check if message has already been received
@@ -337,15 +308,31 @@ const App = () => {
       console.log("Message already contained in notifications.");
       return;
     }
+    
     // Add to notification storage
-    notifications.add(message);
+    notifications.add(msg);
+
+    let decrypted = null;
+    try {
+      decrypted = crypt.decrypt(privateKey, message.msg);
+    } catch (error) {
+      return;
+    }
+
+    const verified = crypt.verify(
+      message.sender_pk,
+      decrypted.signature,
+      decrypted.message
+    );
+
+    if (!verified) {
+      console.log("Received exposure notification with incorrect signature.");
+    }
 
     // Check if key belongs to close contact
     if (contactKeyToTime.has(message.sender_pk)) {
-      console.log(`Received COVID exposure notification for key ${message.sender_pk}`);
-      if (l2Decrypted !== null) {
-        // TODO: notify user with relevant information
-      }
+      console.log(`Exposure for key ${message.sender_pk}, in close contact at time ${contactKeyToTime[message.sender_pk]}`);
+      // Send notification to user
     }
   };
 
