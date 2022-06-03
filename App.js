@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -13,27 +13,28 @@ import {
   // PermissionsAndroid,
   FlatList,
   TouchableHighlight,
-} from "react-native";
+} from 'react-native';
 
-import { Colors } from "react-native/Libraries/NewAppScreen";
+import { Colors } from 'react-native/Libraries/NewAppScreen';
 
-import BleManager from "react-native-ble-manager";
+import BleManager from 'react-native-ble-manager';
 const BleManagerModule = NativeModules.BleManager;
 const bleManagerEmitter = new NativeEventEmitter(BleManagerModule);
 
 // nb: react-native-crypto has a dependency issue;
 // library used seems less good but ok for our purposes
 // https://github.com/juhoen/hybrid-crypto-js
-import { Crypt, RSA } from "hybrid-crypto-js";
-import "react-native-get-random-values";
-
-const KEYSHARE_HEADER = "DENSE keyshare";
-const EXPOSURE_HEADER = "DENSE exposure";
+import { Crypt, RSA } from 'hybrid-crypto-js';
+import 'react-native-get-random-values';
 
 import Contacts from 'react-native-contacts';
 import EncryptedStorage from 'react-native-encrypted-storage';
+import { stringToBytes, bytesToString } from 'convert-string';
 
-const retrieveUserSession = () => {
+const KEYSHARE_HEADER = 'DENSE keyshare';
+const EXPOSURE_HEADER = 'DENSE exposure';
+
+const retrieveUserSession = async () => {
   try {
     const session = await EncryptedStorage.getItem('contacts');
 
@@ -44,26 +45,25 @@ const retrieveUserSession = () => {
         // contacts returned
         //  hash then store
         let phones = [];
-        contacts.forEach(contact => phones.push(contact.phoneNumbers.filter(obj => obj.label === 'mobile')[0].number));
-        let hashed;
-        await EncryptedStorage.setItem(
-          'contacts',
-          JSON.stringify([hashed, new Date().getTime()])
+        contacts.forEach((contact) =>
+          phones.push(contact.phoneNumbers.filter((obj) => obj.label === 'mobile')[0].number)
         );
+        let hashed;
+        await EncryptedStorage.setItem('contacts', JSON.stringify([hashed, new Date().getTime()]));
       });
     }
   } catch (error) {
     // There was an error on the native side
     console.error('Error in retrieveUserSession: ', error);
   }
-}
+};
 
 const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
   const peripherals = new Map();
   const [list, setList] = React.useState([]);
   var publicKey, privateKey;
-  const crypt = new Crypt({ md: "sha256" });
+  const crypt = new Crypt({ md: 'sha256' });
 
   React.useEffect(() => {
     // Initialize public and private keys
@@ -76,28 +76,19 @@ const App = () => {
 
     BleManager.start({ showAlert: false });
 
-    bleManagerEmitter.addListener(
-      "BleManagerDiscoverPeripheral",
-      handleDiscoverPeripheral
-    );
-    bleManagerEmitter.addListener("BleManagerStopScan", handleStopScan);
-    bleManagerEmitter.addListener(
-      "BleManagerDisconnectPeripheral",
-      handleDisconnectedPeripheral
-    );
-    bleManagerEmitter.addListener(
-      "BleManagerDidUpdateValueForCharacteristic",
-      handleUpdateValueForCharacteristic
-    );
-    retrieveUserSession();
+    bleManagerEmitter.addListener('BleManagerDiscoverPeripheral', handleDiscoverPeripheral);
+    bleManagerEmitter.addListener('BleManagerStopScan', handleStopScan);
+    bleManagerEmitter.addListener('BleManagerDisconnectPeripheral', handleDisconnectedPeripheral);
+
+    // retrieveUserSession();
   }, []);
 
   const startScan = () => {
     if (!isScanning) {
-      // scan for 5 seconds
+      // scan for 2 seconds
       BleManager.scan([], 5, true)
         .then((results) => {
-          console.log("Scanning...");
+          console.log('Scanning...');
           setIsScanning(true);
         })
         .catch((err) => {
@@ -105,9 +96,14 @@ const App = () => {
         });
     }
   };
+  const stopScan = () => {
+    BleManager.stopScan();
+    // .then(() => setIsScanning(false))
+    // .catch((err) => console.log(err));
+  };
 
   const handleStopScan = () => {
-    console.log("Scan is stopped");
+    console.log('Scan is stopped');
     setIsScanning(false);
   };
 
@@ -118,23 +114,13 @@ const App = () => {
       peripherals.set(peripheral.id, peripheral);
       setList(Array.from(peripherals.values()));
     }
-    console.log("Disconnected from " + data.peripheral);
-  };
-
-  const handleUpdateValueForCharacteristic = (data) => {
-    console.log(
-      "Received data from " +
-        data.peripheral +
-        " characteristic " +
-        data.characteristic,
-      data.value
-    );
+    console.log('Disconnected from ' + data.peripheral);
   };
 
   const retrieveConnected = () => {
     BleManager.getConnectedPeripherals([]).then((results) => {
       if (results.length == 0) {
-        console.log("No connected peripherals");
+        console.log('No connected peripherals');
       }
       console.log(results);
       for (var i = 0; i < results.length; i++) {
@@ -147,15 +133,17 @@ const App = () => {
   };
 
   const handleDiscoverPeripheral = (peripheral) => {
-    console.log("Got ble peripheral", peripheral);
+    // console.log('Got ble peripheral', peripheral);
     if (!peripheral.name) {
-      peripheral.name = "NO NAME";
+      peripheral.name = 'NO NAME';
+    } else {
+      peripherals.set(peripheral.id, peripheral);
+      setList(Array.from(peripherals.values()));
     }
-    peripherals.set(peripheral.id, peripheral);
-    setList(Array.from(peripherals.values()));
   };
 
   const testPeripheral = (peripheral) => {
+    console.log('testing ' + JSON.stringify(peripheral));
     if (peripheral) {
       if (peripheral.connected) {
         BleManager.disconnect(peripheral.id);
@@ -168,16 +156,86 @@ const App = () => {
               peripherals.set(peripheral.id, p);
               setList(Array.from(peripherals.values()));
             }
-            console.log("Connected to " + peripheral.id);
+            console.log('Connected to ' + peripheral.id);
+
+            const handleUpdateValueForCharacteristic = ({
+              value,
+              peripheral,
+              characteristic,
+              service,
+            }) => {
+              BleManager.getConnectedPeripherals([]).then((results) => {
+                console.log(results);
+              });
+              // const readData = await BleManager.read(
+              //     peripheral.id,
+              //     'D0611E78-BBB4-4591-A5F8-487910AE4366',
+              //     '8667556C-9A37-4C91-84ED-54EE27D90049'
+              //   );
+              //   console.log('Read: ' + readData);
+              //   const buffer = bytesToString(readData);
+              console.log(
+                'Received data from ' + peripheral + ' characteristic ' + characteristic,
+                bytesToString(value)
+              );
+            };
 
             setTimeout(() => {
               /* Test read current RSSI value */
-              BleManager.retrieveServices(peripheral.id).then(
-                (peripheralData) => {
-                  console.log("Retrieved peripheral services", peripheralData);
+              BleManager.retrieveServices(peripheral.id).then(async (peripheralData) => {
+                console.log('Retrieved peripheral services', peripheralData);
+                setTimeout(async () => {
+                  try {
+                    await BleManager.startNotification(
+                      peripheral.id,
+                      // 'FFE0', 'FFE1');
+                      'D0611E78-BBB4-4591-A5F8-487910AE4366',
+                      '8667556C-9A37-4C91-84ED-54EE27D90049'
+                    );
+                    bleManagerEmitter.addListener(
+                      'BleManagerDidUpdateValueForCharacteristic',
+                      handleUpdateValueForCharacteristic
+                    );
+                    setTimeout(() => {
+                      BleManager.writeWithoutResponse(
+                        peripheral.id,
+                        // 'FFE0',
+                        // 'FFE1',
+                        'D0611E78-BBB4-4591-A5F8-487910AE4366',
+                        '8667556C-9A37-4C91-84ED-54EE27D90049',
+                        stringToBytes('Hello world!')
+                      )
+                        .then(() => {
+                          console.log('Write done');
+                        })
+                        .catch((err) => {
+                          console.log(err);
+                        });
+
+                      setTimeout(async () => {
+                        await BleManager.stopNotification(
+                          peripheral.id,
+                          'D0611E78-BBB4-4591-A5F8-487910AE4366',
+                          '8667556C-9A37-4C91-84ED-54EE27D90049'
+                        );
+                      }, 1000);
+                    }, 1000);
+
+                    // const readData = await BleManager.read(
+                    //   peripheral.id,
+                    //   'D0611E78-BBB4-4591-A5F8-487910AE4366',
+                    //   '8667556C-9A37-4C91-84ED-54EE27D90049'
+                    // );
+                    // console.log('Read: ' + readData);
+                    // const buffer = bytesToString(readData); //https://github.com/feross/buffer#convert-arraybuffer-to-buffer
+                    // const sensorData = buffer.readUInt8(1, true);
+                    // console.log('Sensor data: ' + sensorData);
+                  } catch (err) {
+                    console.error(err);
+                  }
 
                   BleManager.readRSSI(peripheral.id).then((rssi) => {
-                    console.log("Retrieved actual RSSI value", rssi);
+                    console.log('Retrieved actual RSSI value', rssi);
                     let p = peripherals.get(peripheral.id);
                     if (p) {
                       p.rssi = rssi;
@@ -185,12 +243,12 @@ const App = () => {
                       setList(Array.from(peripherals.values()));
                     }
                   });
-                }
-              );
+                }, 1000);
+              });
             }, 900);
           })
           .catch((error) => {
-            console.log("Connection error", error);
+            console.log('Connection error', error);
           });
       }
     }
@@ -209,7 +267,7 @@ const App = () => {
     var toEncrypt = crypto.getRandomValues(new Int32Array([244, 100]));
     var encrypted = crypt.encrypt(publicKey, toEncrypt);
     var decrypted = crypt.decrypt(privateKey, encrypted);
-    console.log("Encrypted", toEncrypt, " and got back", decrypted);
+    console.log('Encrypted', toEncrypt, ' and got back', decrypted);
   };
 
   /* Generate a trivial key advertisement message.
@@ -223,14 +281,10 @@ const App = () => {
 
   const sanityCheck = (encrypted) => {
     const decrypted = crypt.decrypt(privateKey, encrypted);
-    const verified = crypt.verify(
-      publicKey,
-      decrypted.signature,
-      decrypted.message
-    );
+    const verified = crypt.verify(publicKey, decrypted.signature, decrypted.message);
     if (verified) {
-      console.log("Encryption and signature passes sanity check!");
-      console.log("Decrypted message: ", decrypted.message);
+      console.log('Encryption and signature passes sanity check!');
+      console.log('Decrypted message: ', decrypted.message);
     }
   };
 
@@ -251,11 +305,7 @@ const App = () => {
 
     /* TODO: update to encrypt with the public keys of receivers from log,
       in place of sender's public key, and remove sanity check.*/
-    const encrypted = crypt.encrypt(
-      [publicKey, publicKey],
-      JSON.stringify(message),
-      signature
-    );
+    const encrypted = crypt.encrypt([publicKey, publicKey], JSON.stringify(message), signature);
     const msg = { header: EXPOSURE_HEADER, time: time, message: encrypted };
     sanityCheck(msg.message);
 
@@ -293,14 +343,10 @@ const App = () => {
     const decrypted = crypt.decrypt(privateKey, msg.message);
     const message = JSON.parse(decrypted.message);
 
-    const verified = crypt.verify(
-      message.sender_pk,
-      decrypted.signature,
-      decrypted.message
-    );
+    const verified = crypt.verify(message.sender_pk, decrypted.signature, decrypted.message);
 
     if (!verified) {
-      console.log("Received exposure message with incorrect signature");
+      console.log('Received exposure message with incorrect signature');
       return;
     }
 
@@ -312,39 +358,36 @@ const App = () => {
   };
 
   const renderItem = (item) => {
-    const color = item.connected ? "green" : "#fff";
+    const color = item.connected ? 'green' : '#fff';
     return (
       <TouchableHighlight onPress={() => testPeripheral(item)}>
         <View style={[styles.row, { backgroundColor: color }]}>
           <Text
             style={{
               fontSize: 12,
-              textAlign: "center",
-              color: "#333333",
+              textAlign: 'center',
+              color: '#333333',
               padding: 10,
-            }}
-          >
+            }}>
             {item.name}
           </Text>
           <Text
             style={{
               fontSize: 10,
-              textAlign: "center",
-              color: "#333333",
+              textAlign: 'center',
+              color: '#333333',
               padding: 2,
-            }}
-          >
+            }}>
             RSSI: {item.rssi}
           </Text>
           <Text
             style={{
               fontSize: 8,
-              textAlign: "center",
-              color: "#333333",
+              textAlign: 'center',
+              color: '#333333',
               padding: 2,
               paddingBottom: 20,
-            }}
-          >
+            }}>
             {item.id}
           </Text>
         </View>
@@ -356,10 +399,7 @@ const App = () => {
     <>
       <StatusBar barStyle="dark-content" />
       <SafeAreaView>
-        <ScrollView
-          contentInsetAdjustmentBehavior="automatic"
-          style={styles.scrollView}
-        >
+        <ScrollView contentInsetAdjustmentBehavior="automatic" style={styles.scrollView}>
           {global.HermesInternal == null ? null : (
             <View style={styles.engine}>
               <Text style={styles.footer}>Engine: Hermes</Text>
@@ -368,16 +408,13 @@ const App = () => {
           <View style={styles.body}>
             <View style={{ margin: 10 }}>
               <Button
-                title={"Scan Bluetooth (" + (isScanning ? "on" : "off") + ")"}
-                onPress={() => startScan()}
+                title={'Scan Bluetooth (' + (isScanning ? 'on' : 'off') + ')'}
+                onPress={() => (!isScanning ? startScan() : stopScan())}
               />
             </View>
 
             <View style={{ margin: 10 }}>
-              <Button
-                title="Retrieve connected peripherals"
-                onPress={() => retrieveConnected()}
-              />
+              <Button title="Retrieve connected peripherals" onPress={() => retrieveConnected()} />
             </View>
 
             <View style={{ margin: 10 }}>
@@ -388,10 +425,7 @@ const App = () => {
             </View>
 
             <View style={{ margin: 10 }}>
-              <Button
-                title="Encrypt and decrypt a message"
-                onPress={() => testCrypto()}
-              />
+              <Button title="Encrypt and decrypt a message" onPress={() => testCrypto()} />
             </View>
 
             <View style={{ margin: 10 }}>
@@ -410,16 +444,16 @@ const App = () => {
 
             {list.length == 0 && (
               <View style={{ flex: 1, margin: 20 }}>
-                <Text style={{ textAlign: "center" }}>No peripherals</Text>
+                <Text style={{ textAlign: 'center' }}>No peripherals</Text>
               </View>
             )}
           </View>
+          <FlatList
+            data={list}
+            renderItem={({ item }) => renderItem(item)}
+            keyExtractor={(item) => item.id}
+          />
         </ScrollView>
-        <FlatList
-          data={list}
-          renderItem={({ item }) => renderItem(item)}
-          keyExtractor={(item) => item.id}
-        />
       </SafeAreaView>
     </>
   );
@@ -430,7 +464,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.lighter,
   },
   engine: {
-    position: "absolute",
+    position: 'absolute',
     right: 0,
   },
   body: {
@@ -442,25 +476,25 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 24,
-    fontWeight: "600",
+    fontWeight: '600',
     color: Colors.black,
   },
   sectionDescription: {
     marginTop: 8,
     fontSize: 18,
-    fontWeight: "400",
+    fontWeight: '400',
     color: Colors.dark,
   },
   highlight: {
-    fontWeight: "700",
+    fontWeight: '700',
   },
   footer: {
     color: Colors.dark,
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: '600',
     padding: 4,
     paddingRight: 12,
-    textAlign: "right",
+    textAlign: 'right',
   },
 });
 
