@@ -1,9 +1,11 @@
-# cs244b
+# CS244b final proj
 
 pre-reqs:\
 node v17.4.0\
 -if not installed, install nvm (node version manager)\
 xcode that can support whatever iOS version your iphone is.
+
+For demo purposes, you'll need to clone the server repo https://github.com/ruslanjabari/DENSeServer
 
 # installation
 git clone the repo\
