@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -12,26 +12,29 @@ import {
   // Platform,
   // PermissionsAndroid,
   FlatList,
-  TouchableHighlight
-} from "react-native";
+  TouchableHighlight,
+  Switch,
+} from 'react-native';
 
-import { Colors } from "react-native/Libraries/NewAppScreen";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Colors } from 'react-native/Libraries/NewAppScreen';
 
-import BleManager from "react-native-ble-manager";
+import BleManager from 'react-native-ble-manager';
 const BleManagerModule = NativeModules.BleManager;
 const bleManagerEmitter = new NativeEventEmitter(BleManagerModule);
 
 // nb: react-native-crypto has a dependency issue;
 // library used seems less good but ok for our purposes
 // https://github.com/juhoen/hybrid-crypto-js
-import { Crypt, RSA } from "hybrid-crypto-js";
-import "react-native-get-random-values";
-
-const KEYSHARE_HEADER = "DENSE keyshare";
-const EXPOSURE_HEADER = "DENSE exposure";
+import { Crypt, RSA } from 'hybrid-crypto-js';
+import 'react-native-get-random-values';
 
 import EncryptedStorage from 'react-native-encrypted-storage';
+import { stringToBytes, bytesToString } from 'convert-string';
+
+const KEYSHARE_HEADER = 'DENSE keyshare';
+const EXPOSURE_HEADER = 'DENSE exposure';
+const SERVICE_UUID = '10000000-0000-0000-0000-000000000001';
+const CHAR_UUID = '20000000-0000-0000-0000-000000000001';
 
 const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
@@ -41,8 +44,9 @@ const App = () => {
   let notifications = new Set();
 
   const [list, setList] = React.useState([]);
-  let publicKey, privateKey;
-  const crypt = new Crypt({ md: "sha256" });
+  const [setRead, setReadInstead] = React.useState(false);
+  var publicKey, privateKey;
+  const crypt = new Crypt({ md: 'sha256' });
 
   React.useEffect(() => {
     retrieveUserSession();
@@ -58,20 +62,11 @@ const App = () => {
 
     BleManager.start({ showAlert: false });
 
-    bleManagerEmitter.addListener(
-      "BleManagerDiscoverPeripheral",
-      handleDiscoverPeripheral
-    );
-    bleManagerEmitter.addListener("BleManagerStopScan", handleStopScan);
-    bleManagerEmitter.addListener(
-      "BleManagerDisconnectPeripheral",
-      handleDisconnectedPeripheral
-    );
-    bleManagerEmitter.addListener(
-      "BleManagerDidUpdateValueForCharacteristic",
-      handleUpdateValueForCharacteristic
-    );
-    retrieveUserSession();
+    bleManagerEmitter.addListener('BleManagerDiscoverPeripheral', handleDiscoverPeripheral);
+    bleManagerEmitter.addListener('BleManagerStopScan', handleStopScan);
+    bleManagerEmitter.addListener('BleManagerDisconnectPeripheral', handleDisconnectedPeripheral);
+
+    // retrieveUserSession();
   }, []);
 
   const retrieveUserSession = async() => {
@@ -106,10 +101,10 @@ const App = () => {
 
   const startScan = () => {
     if (!isScanning) {
-      // scan for 5 seconds
-      BleManager.scan([], 5, true)
+      // scan for 2 seconds
+      BleManager.scan([SERVICE_UUID], 5, true)
         .then((results) => {
-          console.log("Scanning...");
+          console.log('Scanning...');
           setIsScanning(true);
         })
         .catch((err) => {
@@ -117,9 +112,12 @@ const App = () => {
         });
     }
   };
+  const stopScan = () => {
+    BleManager.stopScan();
+  };
 
   const handleStopScan = () => {
-    console.log("Scan is stopped");
+    console.log('Scan is stopped');
     setIsScanning(false);
   };
 
@@ -130,23 +128,13 @@ const App = () => {
       peripherals.set(peripheral.id, peripheral);
       setList(Array.from(peripherals.values()));
     }
-    console.log("Disconnected from " + data.peripheral);
-  };
-
-  const handleUpdateValueForCharacteristic = (data) => {
-    console.log(
-      "Received data from " +
-        data.peripheral +
-        " characteristic " +
-        data.characteristic,
-      data.value
-    );
+    console.log('Disconnected from ' + data.peripheral);
   };
 
   const retrieveConnected = () => {
     BleManager.getConnectedPeripherals([]).then((results) => {
       if (results.length == 0) {
-        console.log("No connected peripherals");
+        console.log('No connected peripherals');
       }
       console.log(results);
       for (var i = 0; i < results.length; i++) {
@@ -159,19 +147,18 @@ const App = () => {
   };
 
   const handleDiscoverPeripheral = (peripheral) => {
-    console.log("Got ble peripheral", peripheral);
     if (!peripheral.name) {
-      peripheral.name = "NO NAME";
+      peripheral.name = 'NO NAME';
+    } else {
+      peripherals.set(peripheral.id, peripheral);
+      setList(Array.from(peripherals.values()));
     }
-    peripherals.set(peripheral.id, peripheral);
-    setList(Array.from(peripherals.values()));
   };
 
-  const testPeripheral = (peripheral) => {
+  const writeMessage = (peripheral, message = 'hello world') => {
     if (peripheral) {
-      if (peripheral.connected) {
-        BleManager.disconnect(peripheral.id);
-      } else {
+      if (!peripheral.connected) {
+        console.log('connecting to ' + JSON.stringify(peripheral));
         BleManager.connect(peripheral.id)
           .then(() => {
             let p = peripherals.get(peripheral.id);
@@ -180,32 +167,80 @@ const App = () => {
               peripherals.set(peripheral.id, p);
               setList(Array.from(peripherals.values()));
             }
-            console.log("Connected to " + peripheral.id);
+            console.log('Connected to ' + peripheral.id);
 
-            setTimeout(() => {
-              /* Test read current RSSI value */
-              BleManager.retrieveServices(peripheral.id).then(
-                (peripheralData) => {
-                  console.log("Retrieved peripheral services", peripheralData);
-
-                  BleManager.readRSSI(peripheral.id).then((rssi) => {
-                    console.log("Retrieved actual RSSI value", rssi);
-                    let p = peripherals.get(peripheral.id);
-                    if (p) {
-                      p.rssi = rssi;
-                      peripherals.set(peripheral.id, p);
-                      setList(Array.from(peripherals.values()));
-                    }
-                  });
-                }
+            const handleUpdateValueForCharacteristic = ({
+              value,
+              peripheral,
+              characteristic,
+              service,
+            }) => {
+              BleManager.getConnectedPeripherals([]).then((results) => {
+                console.log(results);
+              });
+              console.log(
+                'Received data from ' + peripheral + ' characteristic ' + characteristic,
+                bytesToString(value)
               );
-            }, 900);
+            };
+
+            /* Test read current RSSI value */
+            BleManager.retrieveServices(peripheral.id).then(async (peripheralData) => {
+              console.log('Retrieved peripheral services', peripheralData);
+              try {
+                await BleManager.startNotification(peripheral.id, SERVICE_UUID, CHAR_UUID);
+                bleManagerEmitter.addListener(
+                  'BleManagerDidUpdateValueForCharacteristic',
+                  handleUpdateValueForCharacteristic
+                );
+                BleManager.writeWithoutResponse(
+                  peripheral.id,
+                  SERVICE_UUID,
+                  CHAR_UUID,
+                  stringToBytes(message)
+                )
+                  .then(async () => {
+                    console.log('Write done');
+                    await BleManager.stopNotification(peripheral.id, SERVICE_UUID, CHAR_UUID);
+                  })
+                  .catch((err) => {
+                    console.log(err);
+                  });
+              } catch (err) {
+                console.error(err);
+              }
+
+              BleManager.readRSSI(peripheral.id).then((rssi) => {
+                console.log('Retrieved actual RSSI value', rssi);
+                let p = peripherals.get(peripheral.id);
+                if (p) {
+                  p.rssi = rssi;
+                  peripherals.set(peripheral.id, p);
+                  setList(Array.from(peripherals.values()));
+                }
+              });
+            });
           })
           .catch((error) => {
-            console.log("Connection error", error);
+            console.log('Connection error', error);
           });
       }
     }
+  };
+
+  const readMessage = (peripheral) => {
+    BleManager.connect(peripheral.id).then(() => {
+      BleManager.retrieveServices(peripheral.id).then(async () => {
+        try {
+          await BleManager.startNotification(peripheral.id, SERVICE_UUID, CHAR_UUID);
+          bleManagerEmitter.addListener('BleManagerDidUpdateValueForCharacteristic', () => {});
+          const data = await BleManager.read(peripheral.id, SERVICE_UUID, CHAR_UUID);
+          console.log('Read: ' + bytesToString(data));
+        } catch (err) {
+          console.log(err);
+        }
+      });
+    });
   };
 
   const genKeyPair = () => {
@@ -221,7 +256,7 @@ const App = () => {
     var toEncrypt = crypto.getRandomValues(new Int32Array([244, 100]));
     var encrypted = crypt.encrypt(publicKey, toEncrypt);
     var decrypted = crypt.decrypt(privateKey, encrypted);
-    console.log("Encrypted", toEncrypt, " and got back", decrypted);
+    console.log('Encrypted', toEncrypt, ' and got back', decrypted);
   };
 
   const testKeyShare = () => {
@@ -270,8 +305,8 @@ const App = () => {
       decrypted.message
     );
     if (verified) {
-      console.log("Encryption and signature passes sanity check!");
-      console.log("Decrypted message: ", decrypted.message);
+      console.log('Encryption and signature passes sanity check!');
+      console.log('Decrypted message: ', decrypted.message);
     }
   };
 
@@ -370,39 +405,36 @@ const App = () => {
   };
 
   const renderItem = (item) => {
-    const color = item.connected ? "green" : "#fff";
+    const color = item.connected ? 'green' : '#fff';
     return (
-      <TouchableHighlight onPress={() => testPeripheral(item)}>
+      <TouchableHighlight onPress={() => (setRead ? readMessage(item) : writeMessage(item))}>
         <View style={[styles.row, { backgroundColor: color }]}>
           <Text
             style={{
               fontSize: 12,
-              textAlign: "center",
-              color: "#333333",
+              textAlign: 'center',
+              color: '#333333',
               padding: 10,
-            }}
-          >
+            }}>
             {item.name}
           </Text>
           <Text
             style={{
               fontSize: 10,
-              textAlign: "center",
-              color: "#333333",
+              textAlign: 'center',
+              color: '#333333',
               padding: 2,
-            }}
-          >
+            }}>
             RSSI: {item.rssi}
           </Text>
           <Text
             style={{
               fontSize: 8,
-              textAlign: "center",
-              color: "#333333",
+              textAlign: 'center',
+              color: '#333333',
               padding: 2,
               paddingBottom: 20,
-            }}
-          >
+            }}>
             {item.id}
           </Text>
         </View>
@@ -414,10 +446,7 @@ const App = () => {
     <>
       <StatusBar barStyle="dark-content" />
       <SafeAreaView>
-        <ScrollView
-          contentInsetAdjustmentBehavior="automatic"
-          style={styles.scrollView}
-        >
+        <ScrollView contentInsetAdjustmentBehavior="automatic" style={styles.scrollView}>
           {global.HermesInternal == null ? null : (
             <View style={styles.engine}>
               <Text style={styles.footer}>Engine: Hermes</Text>
@@ -426,16 +455,13 @@ const App = () => {
           <View style={styles.body}>
             <View style={{ margin: 10 }}>
               <Button
-                title={"Scan Bluetooth (" + (isScanning ? "on" : "off") + ")"}
-                onPress={() => startScan()}
+                title={'Scan Bluetooth (' + (isScanning ? 'on' : 'off') + ')'}
+                onPress={() => (!isScanning ? startScan() : stopScan())}
               />
             </View>
 
             <View style={{ margin: 10 }}>
-              <Button
-                title="Retrieve connected peripherals"
-                onPress={() => retrieveConnected()}
-              />
+              <Button title="Retrieve connected peripherals" onPress={() => retrieveConnected()} />
             </View>
 
             <View style={{ margin: 10 }}>
@@ -446,10 +472,7 @@ const App = () => {
             </View>
 
             <View style={{ margin: 10 }}>
-              <Button
-                title="Encrypt and decrypt a message"
-                onPress={() => testCrypto()}
-              />
+              <Button title="Encrypt and decrypt a message" onPress={() => testCrypto()} />
             </View>
 
             <View style={{ margin: 10 }}>
@@ -465,19 +488,29 @@ const App = () => {
                 onPress={() => testExposureNotification()}
               />
             </View>
+            <View
+              style={{
+                flexDirection: 'row',
+                width: '100%',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}>
+              <Switch onValueChange={() => setReadInstead(!setRead)} value={setRead} />
+              <Text style={{ paddingLeft: 12, fontWeight: 'bold' }}>Read mode</Text>
+            </View>
 
             {list.length == 0 && (
               <View style={{ flex: 1, margin: 20 }}>
-                <Text style={{ textAlign: "center" }}>No peripherals</Text>
+                <Text style={{ textAlign: 'center' }}>No peripherals</Text>
               </View>
             )}
           </View>
+          <FlatList
+            data={list}
+            renderItem={({ item }) => renderItem(item)}
+            keyExtractor={(item) => item.id}
+          />
         </ScrollView>
-        <FlatList
-          data={list}
-          renderItem={({ item }) => renderItem(item)}
-          keyExtractor={(item) => item.id}
-        />
       </SafeAreaView>
     </>
   );
@@ -488,7 +521,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.lighter,
   },
   engine: {
-    position: "absolute",
+    position: 'absolute',
     right: 0,
   },
   body: {
@@ -500,25 +533,25 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 24,
-    fontWeight: "600",
+    fontWeight: '600',
     color: Colors.black,
   },
   sectionDescription: {
     marginTop: 8,
     fontSize: 18,
-    fontWeight: "400",
+    fontWeight: '400',
     color: Colors.dark,
   },
   highlight: {
-    fontWeight: "700",
+    fontWeight: '700',
   },
   footer: {
     color: Colors.dark,
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: '600',
     padding: 4,
     paddingRight: 12,
-    textAlign: "right",
+    textAlign: 'right',
   },
 });
 
