@@ -13,6 +13,7 @@ import {
   // PermissionsAndroid,
   FlatList,
   TouchableHighlight,
+  Switch,
 } from 'react-native';
 
 import { Colors } from 'react-native/Libraries/NewAppScreen';
@@ -33,6 +34,8 @@ import { stringToBytes, bytesToString } from 'convert-string';
 
 const KEYSHARE_HEADER = 'DENSE keyshare';
 const EXPOSURE_HEADER = 'DENSE exposure';
+const SERVICE_UUID = '10000000-0000-0000-0000-000000000001';
+const CHAR_UUID = '20000000-0000-0000-0000-000000000001';
 
 const retrieveUserSession = async () => {
   try {
@@ -62,6 +65,7 @@ const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
   const peripherals = new Map();
   const [list, setList] = React.useState([]);
+  const [setRead, setReadInstead] = React.useState(false);
   var publicKey, privateKey;
   const crypt = new Crypt({ md: 'sha256' });
 
@@ -86,7 +90,7 @@ const App = () => {
   const startScan = () => {
     if (!isScanning) {
       // scan for 2 seconds
-      BleManager.scan([], 5, true)
+      BleManager.scan([SERVICE_UUID], 5, true)
         .then((results) => {
           console.log('Scanning...');
           setIsScanning(true);
@@ -98,8 +102,6 @@ const App = () => {
   };
   const stopScan = () => {
     BleManager.stopScan();
-    // .then(() => setIsScanning(false))
-    // .catch((err) => console.log(err));
   };
 
   const handleStopScan = () => {
@@ -133,7 +135,6 @@ const App = () => {
   };
 
   const handleDiscoverPeripheral = (peripheral) => {
-    // console.log('Got ble peripheral', peripheral);
     if (!peripheral.name) {
       peripheral.name = 'NO NAME';
     } else {
@@ -142,12 +143,10 @@ const App = () => {
     }
   };
 
-  const testPeripheral = (peripheral) => {
-    console.log('testing ' + JSON.stringify(peripheral));
+  const writeMessage = (peripheral, message = 'hello world') => {
     if (peripheral) {
-      if (peripheral.connected) {
-        BleManager.disconnect(peripheral.id);
-      } else {
+      if (!peripheral.connected) {
+        console.log('connecting to ' + JSON.stringify(peripheral));
         BleManager.connect(peripheral.id)
           .then(() => {
             let p = peripherals.get(peripheral.id);
@@ -167,91 +166,69 @@ const App = () => {
               BleManager.getConnectedPeripherals([]).then((results) => {
                 console.log(results);
               });
-              // const readData = await BleManager.read(
-              //     peripheral.id,
-              //     'D0611E78-BBB4-4591-A5F8-487910AE4366',
-              //     '8667556C-9A37-4C91-84ED-54EE27D90049'
-              //   );
-              //   console.log('Read: ' + readData);
-              //   const buffer = bytesToString(readData);
               console.log(
                 'Received data from ' + peripheral + ' characteristic ' + characteristic,
                 bytesToString(value)
               );
             };
 
-            setTimeout(() => {
-              /* Test read current RSSI value */
-              BleManager.retrieveServices(peripheral.id).then(async (peripheralData) => {
-                console.log('Retrieved peripheral services', peripheralData);
-                setTimeout(async () => {
-                  try {
-                    await BleManager.startNotification(
-                      peripheral.id,
-                      // 'FFE0', 'FFE1');
-                      'D0611E78-BBB4-4591-A5F8-487910AE4366',
-                      '8667556C-9A37-4C91-84ED-54EE27D90049'
-                    );
-                    bleManagerEmitter.addListener(
-                      'BleManagerDidUpdateValueForCharacteristic',
-                      handleUpdateValueForCharacteristic
-                    );
-                    setTimeout(() => {
-                      BleManager.writeWithoutResponse(
-                        peripheral.id,
-                        // 'FFE0',
-                        // 'FFE1',
-                        'D0611E78-BBB4-4591-A5F8-487910AE4366',
-                        '8667556C-9A37-4C91-84ED-54EE27D90049',
-                        stringToBytes('Hello world!')
-                      )
-                        .then(() => {
-                          console.log('Write done');
-                        })
-                        .catch((err) => {
-                          console.log(err);
-                        });
-
-                      setTimeout(async () => {
-                        await BleManager.stopNotification(
-                          peripheral.id,
-                          'D0611E78-BBB4-4591-A5F8-487910AE4366',
-                          '8667556C-9A37-4C91-84ED-54EE27D90049'
-                        );
-                      }, 1000);
-                    }, 1000);
-
-                    // const readData = await BleManager.read(
-                    //   peripheral.id,
-                    //   'D0611E78-BBB4-4591-A5F8-487910AE4366',
-                    //   '8667556C-9A37-4C91-84ED-54EE27D90049'
-                    // );
-                    // console.log('Read: ' + readData);
-                    // const buffer = bytesToString(readData); //https://github.com/feross/buffer#convert-arraybuffer-to-buffer
-                    // const sensorData = buffer.readUInt8(1, true);
-                    // console.log('Sensor data: ' + sensorData);
-                  } catch (err) {
-                    console.error(err);
-                  }
-
-                  BleManager.readRSSI(peripheral.id).then((rssi) => {
-                    console.log('Retrieved actual RSSI value', rssi);
-                    let p = peripherals.get(peripheral.id);
-                    if (p) {
-                      p.rssi = rssi;
-                      peripherals.set(peripheral.id, p);
-                      setList(Array.from(peripherals.values()));
-                    }
+            /* Test read current RSSI value */
+            BleManager.retrieveServices(peripheral.id).then(async (peripheralData) => {
+              console.log('Retrieved peripheral services', peripheralData);
+              try {
+                await BleManager.startNotification(peripheral.id, SERVICE_UUID, CHAR_UUID);
+                bleManagerEmitter.addListener(
+                  'BleManagerDidUpdateValueForCharacteristic',
+                  handleUpdateValueForCharacteristic
+                );
+                BleManager.writeWithoutResponse(
+                  peripheral.id,
+                  SERVICE_UUID,
+                  CHAR_UUID,
+                  stringToBytes(message)
+                )
+                  .then(async () => {
+                    console.log('Write done');
+                    await BleManager.stopNotification(peripheral.id, SERVICE_UUID, CHAR_UUID);
+                  })
+                  .catch((err) => {
+                    console.log(err);
                   });
-                }, 1000);
+              } catch (err) {
+                console.error(err);
+              }
+
+              BleManager.readRSSI(peripheral.id).then((rssi) => {
+                console.log('Retrieved actual RSSI value', rssi);
+                let p = peripherals.get(peripheral.id);
+                if (p) {
+                  p.rssi = rssi;
+                  peripherals.set(peripheral.id, p);
+                  setList(Array.from(peripherals.values()));
+                }
               });
-            }, 900);
+            });
           })
           .catch((error) => {
             console.log('Connection error', error);
           });
       }
     }
+  };
+
+  const readMessage = (peripheral) => {
+    BleManager.connect(peripheral.id).then(() => {
+      BleManager.retrieveServices(peripheral.id).then(async () => {
+        try {
+          await BleManager.startNotification(peripheral.id, SERVICE_UUID, CHAR_UUID);
+          bleManagerEmitter.addListener('BleManagerDidUpdateValueForCharacteristic', () => {});
+          const data = await BleManager.read(peripheral.id, SERVICE_UUID, CHAR_UUID);
+          console.log('Read: ' + bytesToString(data));
+        } catch (err) {
+          console.log(err);
+        }
+      });
+    });
   };
 
   const genKeyPair = () => {
@@ -360,7 +337,7 @@ const App = () => {
   const renderItem = (item) => {
     const color = item.connected ? 'green' : '#fff';
     return (
-      <TouchableHighlight onPress={() => testPeripheral(item)}>
+      <TouchableHighlight onPress={() => (setRead ? readMessage(item) : writeMessage(item))}>
         <View style={[styles.row, { backgroundColor: color }]}>
           <Text
             style={{
@@ -440,6 +417,16 @@ const App = () => {
                 title="Print an exposure notification to the console"
                 onPress={() => console.log(genExposureNotification())}
               />
+            </View>
+            <View
+              style={{
+                flexDirection: 'row',
+                width: '100%',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}>
+              <Switch onValueChange={() => setReadInstead(!setRead)} value={setRead} />
+              <Text style={{ paddingLeft: 12, fontWeight: 'bold' }}>Read mode</Text>
             </View>
 
             {list.length == 0 && (
