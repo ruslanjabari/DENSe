@@ -18,7 +18,7 @@ import {
 
 import { Colors } from 'react-native/Libraries/NewAppScreen';
 
-import BleManager from 'react-native-ble-manager';
+import BleManager, { write } from 'react-native-ble-manager';
 const BleManagerModule = NativeModules.BleManager;
 const bleManagerEmitter = new NativeEventEmitter(BleManagerModule);
 
@@ -35,13 +35,17 @@ const KEYSHARE_HEADER = 'DENSE keyshare';
 const EXPOSURE_HEADER = 'DENSE exposure';
 const SERVICE_UUID = '10000000-0000-0000-0000-000000000001';
 const CHAR_UUID = '20000000-0000-0000-0000-000000000001';
+const CHAR_UUID2 = '20000000-0000-0000-0000-000000000002';
+const CHAR_UUID3 = '20000000-0000-0000-0000-000000000003';
+const CHAR_UUID4 = '20000000-0000-0000-0000-000000000004';
 
 const App = () => {
   const [isScanning, setIsScanning] = React.useState(false);
-  const peripherals = new Map();
+  const [peripherals, setPeripherals] = React.useState(new Map());
 
   let contactKeyToTime = new Map();
   let notifications = new Set();
+  let trip = false;
 
   const [list, setList] = React.useState([]);
   const [setRead, setReadInstead] = React.useState(false);
@@ -49,7 +53,57 @@ const App = () => {
   const [publicKey, setPublicKey] = React.useState(undefined);
   const [privateKey, setPrivateKey] = React.useState(undefined);
   const crypt = new Crypt({ md: 'sha256' });
+  let parts = [];
+  const readListener = () => {
+    setInterval(() => {
+      console.log('Checking for key exchange messages...');
+      peripherals.forEach((peripheral) => {
+        let message = readMessage(peripheral, CHAR_UUID);
+        let message2, message3, message4;
+        setTimeout(() => {
+          message2 = readMessage(peripheral, CHAR_UUID2);
+        }, 1500);
+        setTimeout(() => {
+          message3 = readMessage(peripheral, CHAR_UUID3);
+        }, 3500);
+        setTimeout(() => {
+          message4 = readMessage(peripheral, CHAR_UUID4);
+        }, 5500);
+        if (message) console.log('1', message);
+        if (message2) console.log('2', message2);
+        if (message3) console.log('3', message3);
+        if (message4) console.log('4', message4);
+        if (message && message !== 'EOF') {
+          if (message.startsWith(KEYSHARE_HEADER)) {
+            const msg = JSON.parse(msg);
+            if (msg.pk === publicKey) {
+              return;
+            }
+            // if (message.header === KEYSHARE_HEADER) {
+            processKeyShareMessage(msg);
+            // return;
+            // return;
+            // }
+          }
+        }
+        if (message2 && message2 !== 'EOF') {
+          parts[0] = JSON.parse(JSON.stringify(msg))['header-1'];
+          console.log('potnetial rem', msg);
+        }
+        if (message3 && message3 !== 'EOF') {
+          parts[1] = JSON.parse(JSON.stringify(msg))['header-2'];
+        }
+        if (message4 && message4 !== 'EOF') {
+          parts[2] = JSON.parse(JSON.stringify(msg))['header-3'];
+        }
 
+        if (parts[0] && parts[1] && parts[2] && !trip) {
+          trip = true;
+          processExposureMessage(parts.join(''));
+        }
+      });
+    }, 5000);
+  };
   React.useEffect(() => {
     retrieveUserSession();
     // Initialize public and private keys
@@ -69,7 +123,7 @@ const App = () => {
     bleManagerEmitter.addListener('BleManagerDiscoverPeripheral', handleDiscoverPeripheral);
     bleManagerEmitter.addListener('BleManagerStopScan', handleStopScan);
     bleManagerEmitter.addListener('BleManagerDisconnectPeripheral', handleDisconnectedPeripheral);
-
+    readListener();
     // retrieveUserSession();
   }, []);
 
@@ -154,90 +208,91 @@ const App = () => {
       peripheral.name = 'NO NAME';
     } else {
       peripherals.set(peripheral.id, peripheral);
+      console.log('added discovered peripheral: ' + peripheral.id);
       setList(Array.from(peripherals.values()));
     }
   };
 
-  const writeMessage = (peripheral, message = 'hello world') => {
+  const writeMessage = (peripheral, message = 'hello world', CHARID = CHAR_UUID) => {
     if (peripheral) {
-      if (!peripheral.connected) {
-        console.log('connecting to ' + JSON.stringify(peripheral));
-        BleManager.connect(peripheral.id)
-          .then(() => {
-            let p = peripherals.get(peripheral.id);
-            if (p) {
-              p.connected = true;
-              peripherals.set(peripheral.id, p);
-              setList(Array.from(peripherals.values()));
-            }
-            console.log('Connected to ' + peripheral.id);
+      // if (!peripheral.connected) {
+      //   console.log('connecting to ' + JSON.stringify(peripheral));
+      //   BleManager.connect(peripheral.id)
+      //     .then(() => {
+      //       let p = peripherals.get(peripheral.id);
+      //       if (p) {
+      //         p.connected = true;
+      //         peripherals.set(peripheral.id, p);
+      //         setList(Array.from(peripherals.values()));
+      //       }
+      //       console.log('Connected to ' + peripheral.id);
+      //     })
+      //     .catch((error) => {
+      //       console.log('Connection error', error);
+      //     });
+      // }
 
-            const handleUpdateValueForCharacteristic = ({
-              value,
-              peripheral,
-              characteristic,
-              service,
-            }) => {
-              BleManager.getConnectedPeripherals([]).then((results) => {
-                console.log(results);
-              });
-              console.log(
-                'Received data from ' + peripheral + ' characteristic ' + characteristic,
-                bytesToString(value)
-              );
-            };
+      const handleUpdateValueForCharacteristic = ({
+        value,
+        peripheral,
+        characteristic,
+        service,
+      }) => {
+        BleManager.getConnectedPeripherals([]).then((results) => {
+          console.log(results);
+        });
+        console.log(
+          'Received data from ' + peripheral + ' characteristic ' + characteristic,
+          bytesToString(value)
+        );
+      };
 
-            /* Test read current RSSI value */
-            BleManager.retrieveServices(peripheral.id).then(async (peripheralData) => {
-              console.log('Retrieved peripheral services', peripheralData);
-              try {
-                await BleManager.startNotification(peripheral.id, SERVICE_UUID, CHAR_UUID);
-                bleManagerEmitter.addListener(
-                  'BleManagerDidUpdateValueForCharacteristic',
-                  handleUpdateValueForCharacteristic
-                );
-                BleManager.writeWithoutResponse(
-                  peripheral.id,
-                  SERVICE_UUID,
-                  CHAR_UUID,
-                  stringToBytes(message)
-                )
-                  .then(async () => {
-                    console.log('Write done');
-                    await BleManager.stopNotification(peripheral.id, SERVICE_UUID, CHAR_UUID);
-                  })
-                  .catch((err) => {
-                    console.log(err);
-                  });
-              } catch (err) {
-                console.error(err);
-              }
-
-              BleManager.readRSSI(peripheral.id).then((rssi) => {
-                console.log('Retrieved actual RSSI value', rssi);
-                let p = peripherals.get(peripheral.id);
-                if (p) {
-                  p.rssi = rssi;
-                  peripherals.set(peripheral.id, p);
-                  setList(Array.from(peripherals.values()));
-                }
-              });
+      /* Test read current RSSI value */
+      BleManager.retrieveServices(peripheral.id).then(async (peripheralData) => {
+        console.log('Retrieved peripheral services', peripheralData);
+        try {
+          await BleManager.startNotification(peripheral.id, SERVICE_UUID, CHARID);
+          bleManagerEmitter.addListener(
+            'BleManagerDidUpdateValueForCharacteristic',
+            handleUpdateValueForCharacteristic
+          );
+          BleManager.writeWithoutResponse(
+            peripheral.id,
+            SERVICE_UUID,
+            CHARID,
+            stringToBytes(message)
+          )
+            .then(async () => {
+              console.log('Write done');
+              // await BleManager.stopNotification(peripheral.id, SERVICE_UUID, CHARID);
+            })
+            .catch((err) => {
+              console.log(err);
             });
-          })
-          .catch((error) => {
-            console.log('Connection error', error);
-          });
-      }
+        } catch (err) {
+          console.error(err);
+        }
+
+        BleManager.readRSSI(peripheral.id).then((rssi) => {
+          console.log('Retrieved actual RSSI value', rssi);
+          let p = peripherals.get(peripheral.id);
+          if (p) {
+            p.rssi = rssi;
+            peripherals.set(peripheral.id, p);
+            setList(Array.from(peripherals.values()));
+          }
+        });
+      });
     }
   };
 
-  const readMessage = (peripheral) => {
+  const readMessage = (peripheral, CHARID = CHAR_UUID) => {
     BleManager.connect(peripheral.id).then(() => {
       BleManager.retrieveServices(peripheral.id).then(async () => {
         try {
-          await BleManager.startNotification(peripheral.id, SERVICE_UUID, CHAR_UUID);
+          await BleManager.startNotification(peripheral.id, SERVICE_UUID, CHARID);
           bleManagerEmitter.addListener('BleManagerDidUpdateValueForCharacteristic', () => {});
-          const data = await BleManager.read(peripheral.id, SERVICE_UUID, CHAR_UUID);
+          const data = await BleManager.read(peripheral.id, SERVICE_UUID, CHARID);
           console.log('Read: ' + bytesToString(data));
           return data;
         } catch (err) {
@@ -343,13 +398,10 @@ const App = () => {
    * - header: should be equal to KEYSHARE_HEADER
    * - message: should contain a public key
    */
-  const processKeyShareMessage = (msg) => {
-    const message = JSON.parse(msg);
+  const processKeyShareMessage = (message) => {
     const time = message.time;
     const pk = message.pk;
-    if (pk === publicKey) {
-      return;
-    }
+
     console.log(`Received keyshare message at time ${time}.`);
     // Log message info
     contactKeyToTime.set(pk, message.time);
@@ -395,12 +447,17 @@ const App = () => {
       console.log('Received exposure notification with incorrect signature.');
       return;
     }
+    // don't accept your own
+    if (sender_pk === publicKey) {
+      return;
+    }
     // Check if key belongs to close contact
     if (contactKeyToTime.has(sender_pk)) {
       console.log(`Exposure at time ${contactKeyToTime.get(sender_pk)}.`);
       // Send notification to user
     }
     console.log('Completed processing of exposure message...');
+    alert('Exposure detected! Please contact your local health care provider.');
   };
 
   const initExchange = () => {
@@ -411,21 +468,48 @@ const App = () => {
       console.log('Sending key exchange message...');
       console.log(peripherals);
       peripherals.forEach((peripheral) => {
-        writeMessage(peripheral, keyExchangeMessageSerialized);
+        writeMessage(peripheral, keyExchangeMessageSerialized, CHAR_UUID);
       });
-      setInterval(() => {
-        console.log('Checking for key exchange messages...');
-        peripherals.forEach((peripheral) => {
-          const message = readMessage(peripheral);
-          if (message) {
-            console.log(message);
-            processKeyShareMessage();
-          }
-        });
-      }, 5000);
     } catch (error) {
       console.log('Error initializing exchange.\n', err);
     }
+  };
+
+  const initExposureNotification = () => {
+    console.log('logging your exposure');
+    const exposureMessage = genExposureNotification();
+    const exposureMessageSerialized = JSON.stringify(exposureMessage);
+    console.log('Sending exposure notification...\n', exposureMessageSerialized);
+    peripherals.forEach((peripheral) => {
+      const chunk1 = exposureMessageSerialized.slice(0, 400);
+      const chunk2 = exposureMessageSerialized.slice(400, 800);
+      const chunk3 = exposureMessageSerialized.slice(800, exposureMessageSerialized.length);
+      setTimeout(() => {
+        writeMessage(peripheral, JSON.stringify({ 'header-1': chunk1 }), CHAR_UUID2);
+        setTimeout(() => {
+          writeMessage(peripheral, JSON.stringify({ 'header-1': chunk1 }), CHAR_UUID2);
+          setTimeout(() => {
+            writeMessage(peripheral, JSON.stringify({ 'header-2': chunk2 }), CHAR_UUID3);
+            setTimeout(() => {
+              writeMessage(peripheral, JSON.stringify({ 'header-2': chunk2 }), CHAR_UUID3);
+              setTimeout(() => {
+                writeMessage(peripheral, JSON.stringify({ 'header-3': chunk3 }), CHAR_UUID4);
+                setTimeout(() => {
+                  writeMessage(peripheral, JSON.stringify({ 'header-3': chunk3 }), CHAR_UUID4);
+                }, 4500);
+              }, 3500);
+            }, 2500);
+          }, 1500);
+        }, 1000);
+      }, 10);
+
+      // writeMessage(peripheral, exposureMessageSerialized.slice(0, 512));
+      // writeMessage(
+      //   peripheral,
+      //   exposureMessageSerialized.slice(512, exposureMessageSerialized.length)
+      // );
+      // writeMessage(peripheral, exposureMessageSerialized);
+    });
   };
 
   const renderItem = (item) => {
@@ -434,10 +518,26 @@ const App = () => {
       // <TouchableHighlight onPress={() => (setRead ? readMessage(item) : writeMessage(item))}>
       <TouchableHighlight
         onPress={() => {
-          BleManager.connect(item.id).then((peripheralInfo) => {
-            console.log('Connected to', item);
-            peripherals.set(item.id, item);
-          });
+          BleManager.connect(item.id)
+            .then(() => {
+              // let p = peripherals.get(item.id);
+              // if (p) {
+              // p.connected = true;
+              let tmp = peripherals;
+              tmp.set(item.id, item);
+              setPeripherals(tmp);
+              setList(Array.from(peripherals.values()));
+              // }
+              console.log('Connected to ' + item.id);
+            })
+            .catch((error) => {
+              console.log('Connection error', error);
+            });
+
+          // BleManager.connect(item.id).then((peripheralInfo) => {
+          //   console.log('Connected to', item);
+          //   peripherals.set(item.id, item);
+          // });
         }}>
         <View style={[styles.row, { backgroundColor: color }]}>
           <Text
@@ -519,8 +619,16 @@ const App = () => {
                 onPress={() => testExposureNotification()}
               />
             </View>
-            <View style={{ margin: 10 }}>
+            <View
+              style={{
+                margin: 10,
+                justifyContent: 'center',
+                alignItems: 'center',
+                width: '100%',
+                flexDirection: 'row',
+              }}>
               <Button title="initate exchange" onPress={initExchange} />
+              <Button color={'red'} title="🚨 GOT DA VID" onPress={initExposureNotification} />
             </View>
             <View
               style={{
