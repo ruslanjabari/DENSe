@@ -593,9 +593,13 @@ const App = () => {
             </View>
 
             <View style={{ margin: 10 }}>
+                <Button title="[DEMO] Share keys" onPress={initExchange} />
+            </View>
+
+            <View style={{ margin: 10 }}>
               <Button
-                title={'Notify other users that I have COVID'}
-                onPress={() => (initExposureNotification())}
+                title={'[DEMO] Notify other users that I have COVID'}
+                onPress={initExposureNotification}
               />
             </View>
 
