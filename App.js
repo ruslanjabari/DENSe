@@ -592,54 +592,61 @@ const App = () => {
             </View>
 
             <View style={{ margin: 10 }}>
-              <Button title="Retrieve connected peripherals" onPress={() => retrieveConnected()} />
-            </View>
-
-            <View style={{ margin: 10 }}>
               <Button
-                title="Generate a fresh key pair (may take a while)"
-                onPress={() => genKeyPair()}
+                title={'Notify other users that I have COVID'}
+                onPress={() => (initExposureNotification())}
               />
             </View>
 
-            <View style={{ margin: 10 }}>
-              <Button title="Encrypt and decrypt a message" onPress={() => testCrypto()} />
-            </View>
-
-            <View style={{ margin: 10 }}>
-              <Button
-                title="Generate and process keyshare message"
-                onPress={() => testKeyShare()}
-              />
-            </View>
-
-            <View style={{ margin: 10 }}>
-              <Button
-                title="Generate and process exposure notification"
-                onPress={() => testExposureNotification()}
-              />
-            </View>
-            <View
-              style={{
-                margin: 10,
-                justifyContent: 'center',
-                alignItems: 'center',
-                width: '100%',
-                flexDirection: 'row',
-              }}>
-              <Button title="initate exchange" onPress={initExchange} />
-              <Button color={'red'} title="🚨 GOT DA VID" onPress={initExposureNotification} />
-            </View>
-            <View
-              style={{
-                flexDirection: 'row',
-                width: '100%',
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}>
-              <Switch onValueChange={() => setReadInstead(!setRead)} value={setRead} />
-              <Text style={{ paddingLeft: 12, fontWeight: 'bold' }}>Read mode</Text>
-            </View>
+            // <View style={{ margin: 10 }}>
+            //   <Button title="Retrieve connected peripherals" onPress={() => retrieveConnected()} />
+            // </View>
+            //
+            // <View style={{ margin: 10 }}>
+            //   <Button
+            //     title="Generate a fresh key pair (may take a while)"
+            //     onPress={() => genKeyPair()}
+            //   />
+            // </View>
+            //
+            // <View style={{ margin: 10 }}>
+            //   <Button title="Encrypt and decrypt a message" onPress={() => testCrypto()} />
+            // </View>
+            //
+            // <View style={{ margin: 10 }}>
+            //   <Button
+            //     title="Generate and process keyshare message"
+            //     onPress={() => testKeyShare()}
+            //   />
+            // </View>
+            //
+            // <View style={{ margin: 10 }}>
+            //   <Button
+            //     title="Generate and process exposure notification"
+            //     onPress={() => testExposureNotification()}
+            //   />
+            // </View>
+            // <View
+            //   style={{
+            //     margin: 10,
+            //     justifyContent: 'center',
+            //     alignItems: 'center',
+            //     width: '100%',
+            //     flexDirection: 'row',
+            //   }}>
+            //   <Button title="initate exchange" onPress={initExchange} />
+            //   <Button color={'red'} title="🚨 GOT DA VID" onPress={initExposureNotification} />
+            // </View>
+            // <View
+            //   style={{
+            //     flexDirection: 'row',
+            //     width: '100%',
+            //     justifyContent: 'center',
+            //     alignItems: 'center',
+            //   }}>
+            //   <Switch onValueChange={() => setReadInstead(!setRead)} value={setRead} />
+            //   <Text style={{ paddingLeft: 12, fontWeight: 'bold' }}>Read mode</Text>
+            // </View>
 
             {list.length == 0 && (
               <View style={{ flex: 1, margin: 20 }}>
