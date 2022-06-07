@@ -45,7 +45,9 @@ const App = () => {
 
   const [list, setList] = React.useState([]);
   const [setRead, setReadInstead] = React.useState(false);
-  var publicKey, privateKey;
+  // let publicKey, privateKey;
+  const [publicKey, setPublicKey] = React.useState(undefined);
+  const [privateKey, setPrivateKey] = React.useState(undefined);
   const crypt = new Crypt({ md: 'sha256' });
 
   React.useEffect(() => {
@@ -55,8 +57,10 @@ const App = () => {
       var rsa = new RSA({ entropy: 244 });
       rsa.generateKeyPair(function (keys) {
         console.log(keys);
-        publicKey = keys.publicKey;
-        privateKey = keys.privateKey;
+        // publicKey = keys.publicKey;
+        // privateKey = keys.privateKey;
+        setPrivateKey(keys.privateKey);
+        setPublicKey(keys.publicKey);
       }, 1024);
     }
 
@@ -69,35 +73,34 @@ const App = () => {
     // retrieveUserSession();
   }, []);
 
-  const retrieveUserSession = async() => {
-    console.log("Retrieving user session.");
+  const retrieveUserSession = async () => {
+    console.log('Retrieving user session.');
     try {
       const session = await EncryptedStorage.getItem('session');
       if (session !== undefined) {
-        console.log("Session found - setup from encrypted storage.");
+        console.log('Session found - setup from encrypted storage.');
         sessionObj = JSON.parse(session);
-        publicKey = sessionObj['pk'];
-        privateKey = sessionObj['sk'];
+        // publicKey = sessionObj['pk'];
+        // privateKey = sessionObj['sk'];
+        setPrivateKey(sessionObj['sk']);
+        setPublicKey(sessionObj['pk']);
         contactKeyToTime = new Map(Object.entries(JSON.parse(sessionObj['contactKeyToTime'])));
         notifications = new Set(sessionObj['notifications']);
-        console.log("Setup complete.")
+        console.log('Setup complete.');
       }
     } catch (error) {
-      console.log("Encountered error in retrieving user session.")
+      console.log('Encountered error in retrieving user session.');
     }
-  }
+  };
 
-  const storeUserSession = async() => {
+  const storeUserSession = async () => {
     const sessionObj = new Object();
     sessionObj['notifications'] = Array.from(notifications.values());
     sessionObj['contactKeyToTime'] = JSON.stringify(contactKeyToTime);
     sessionObj['pk'] = publicKey;
     sessionObj['sk'] = privateKey;
-    await EncryptedStorage.setItem(
-      'session',
-      JSON.stringify(sessionObj)
-    );
-  }
+    await EncryptedStorage.setItem('session', JSON.stringify(sessionObj));
+  };
 
   const startScan = () => {
     if (!isScanning) {
@@ -236,6 +239,7 @@ const App = () => {
           bleManagerEmitter.addListener('BleManagerDidUpdateValueForCharacteristic', () => {});
           const data = await BleManager.read(peripheral.id, SERVICE_UUID, CHAR_UUID);
           console.log('Read: ' + bytesToString(data));
+          return data;
         } catch (err) {
           console.log(err);
         }
@@ -266,7 +270,7 @@ const App = () => {
     console.log(msg);
     let serialized = JSON.stringify(msg);
     processKeyShareMessage(serialized);
-  }
+  };
 
   /**
    * Test generation and processing of local exposure notification.
@@ -274,14 +278,13 @@ const App = () => {
   const testExposureNotification = () => {
     contactKeyToTime = new Map();
     notifications = new Set();
-    const time = (new Date()).toUTCString();
+    const time = new Date().toUTCString();
     contactKeyToTime.set(publicKey, time);
     let msg = genExposureNotification();
     sanityCheck(msg.message);
     let serialized = JSON.stringify(msg);
     processExposureMessage(serialized);
-  }
-
+  };
 
   /* Generate a trivial key advertisement message.
    */
@@ -290,20 +293,17 @@ const App = () => {
     const msg = {
       header: KEYSHARE_HEADER,
       pk: publicKey,
-      time: time.toUTCString()
+      time: time.toUTCString(),
     };
+    console.log('Generated key advertisement message', msg);
     return msg;
   };
 
   const sanityCheck = (encrypted) => {
-    console.log("Performing sanity check...");
+    console.log('Performing sanity check...');
     const decrypted = crypt.decrypt(privateKey, encrypted);
-    console.log("Successfully decrypted message.");
-    const verified = crypt.verify(
-      publicKey,
-      decrypted.signature,
-      decrypted.message
-    );
+    console.log('Successfully decrypted message.');
+    const verified = crypt.verify(publicKey, decrypted.signature, decrypted.message);
     if (verified) {
       console.log('Encryption and signature passes sanity check!');
       console.log('Decrypted message: ', decrypted.message);
@@ -316,7 +316,7 @@ const App = () => {
    * as the message may be forwarded by intermediaries who shouldn't know the sender's identity.)
    */
   const genExposureNotification = () => {
-    console.log("Generating exposure notification...");
+    console.log('Generating exposure notification...');
     // Encrypted information
     const time = new Date();
     const salt = crypto.getRandomValues(new Int32Array([244]))[0];
@@ -333,7 +333,7 @@ const App = () => {
       signature
     );
 
-    console.log("Successfully encrypted message.");
+    console.log('Successfully encrypted message.');
 
     const msg = { header: EXPOSURE_HEADER, time: time, message: encrypted };
     return msg;
@@ -347,6 +347,9 @@ const App = () => {
     const message = JSON.parse(msg);
     const time = message.time;
     const pk = message.pk;
+    if (pk === publicKey) {
+      return;
+    }
     console.log(`Received keyshare message at time ${time}.`);
     // Log message info
     contactKeyToTime.set(pk, message.time);
@@ -368,15 +371,15 @@ const App = () => {
 
     // Check if message has already been received
     if (notifications.has(message)) {
-      console.log("Message already contained in notifications.");
+      console.log('Message already contained in notifications.');
       return;
     }
 
     // Add to encrypted notification storage
     notifications.add(msg);
-    console.log("Adding exposure notification to storage.");
+    console.log('Adding exposure notification to storage.');
     storeUserSession();
-    console.log("Updated storage.");
+    console.log('Updated storage.');
 
     let decrypted = null;
     try {
@@ -384,16 +387,12 @@ const App = () => {
     } catch (error) {
       return;
     }
-    console.log("Successfully decrypted exposure notification.");
+    console.log('Successfully decrypted exposure notification.');
 
     let sender_pk = JSON.parse(decrypted.message).sender_pk;
-    const verified = crypt.verify(
-      sender_pk,
-      decrypted.signature,
-      decrypted.message
-    );
+    const verified = crypt.verify(sender_pk, decrypted.signature, decrypted.message);
     if (!verified) {
-      console.log("Received exposure notification with incorrect signature.");
+      console.log('Received exposure notification with incorrect signature.');
       return;
     }
     // Check if key belongs to close contact
@@ -401,13 +400,45 @@ const App = () => {
       console.log(`Exposure at time ${contactKeyToTime.get(sender_pk)}.`);
       // Send notification to user
     }
-    console.log("Completed processing of exposure message...");
+    console.log('Completed processing of exposure message...');
+  };
+
+  const initExchange = () => {
+    try {
+      console.log('Initializing exchange...');
+      const keyExchangeMessage = genKeyShareMessage();
+      const keyExchangeMessageSerialized = JSON.stringify(keyExchangeMessage);
+      console.log('Sending key exchange message...');
+      console.log(peripherals);
+      peripherals.forEach((peripheral) => {
+        writeMessage(peripheral, keyExchangeMessageSerialized);
+      });
+      setInterval(() => {
+        console.log('Checking for key exchange messages...');
+        peripherals.forEach((peripheral) => {
+          const message = readMessage(peripheral);
+          if (message) {
+            console.log(message);
+            processKeyShareMessage();
+          }
+        });
+      }, 5000);
+    } catch (error) {
+      console.log('Error initializing exchange.\n', err);
+    }
   };
 
   const renderItem = (item) => {
     const color = item.connected ? 'green' : '#fff';
     return (
-      <TouchableHighlight onPress={() => (setRead ? readMessage(item) : writeMessage(item))}>
+      // <TouchableHighlight onPress={() => (setRead ? readMessage(item) : writeMessage(item))}>
+      <TouchableHighlight
+        onPress={() => {
+          BleManager.connect(item.id).then((peripheralInfo) => {
+            console.log('Connected to', item);
+            peripherals.set(item.id, item);
+          });
+        }}>
         <View style={[styles.row, { backgroundColor: color }]}>
           <Text
             style={{
@@ -487,6 +518,9 @@ const App = () => {
                 title="Generate and process exposure notification"
                 onPress={() => testExposureNotification()}
               />
+            </View>
+            <View style={{ margin: 10 }}>
+              <Button title="initate exchange" onPress={initExchange} />
             </View>
             <View
               style={{
