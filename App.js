@@ -403,6 +403,7 @@ const App = () => {
     const pk = message.pk;
 
     console.log(`Received keyshare message at time ${time}.`);
+    alert('[DEMO] Got a new keyshare message!');
     // Log message info
     contactKeyToTime.set(pk, message.time);
     storeUserSession();
